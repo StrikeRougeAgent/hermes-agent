@@ -7,6 +7,7 @@ the owner functions' behavior (including byte-exact hash outputs — they feed
 prompt-cache keys) and verify the legacy entry points still delegate here.
 """
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -440,6 +441,20 @@ def test_normalize_provider_parallel_ids_is_deterministic_and_preserves_composit
     assert calls == first
     assert calls[0]["id"].endswith("|item-a")
     assert all(c["id"].startswith("call_") for c in calls)
+
+def test_normalize_provider_parallel_ids_logs_below_warning(caplog):
+    caplog.set_level(logging.DEBUG, logger="agent.message_sanitization")
+    calls = [
+        {"id": "chatcmpl-tool-alpha", "call_id": "chatcmpl-tool-alpha"},
+        {"id": "chatcmpl-tool-beta", "call_id": "chatcmpl-tool-beta"},
+    ]
+
+    normalize_provider_tool_call_ids(calls)
+
+    records = [r for r in caplog.records if "Normalized provider-minted" in r.getMessage()]
+    assert records, "the compatibility rewrite should still be observable at DEBUG"
+    assert all(r.levelno < logging.WARNING for r in records)
+
 
 def test_normalize_provider_ids_leaves_single_and_mixed_batches_unchanged():
     for calls in [
