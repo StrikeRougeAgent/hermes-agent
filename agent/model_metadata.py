@@ -881,7 +881,7 @@ def _extract_pricing(payload: dict[str, Any]) -> dict[str, Any]:
         "cache_write": ("cache_write", "cache_creation", "input_cache_write", "cache_write_cost_per_token"),
         "cache_write_1h": ("cache_write_1h", "input_cache_write_1h"),}
     for mapping in _iter_nested_dicts(payload):
-        normalized = {str(key).lower(): value for key, value in mapping.items()}
+        normalized = {str(key).lower(): value for key, value in mapping.items() if not isinstance(value, (dict, list, tuple, set))}  # structured blocks (e.g. modalities lists) are not rates, and are unhashable below (#158208)
         pricing: dict[str, Any] = {}
         for target, aliases in alias_map.items():
             for alias in aliases:
