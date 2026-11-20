@@ -33,6 +33,21 @@ CORE_RUNTIME_KEYS: dict[str, str] = {
     "dashboard.kanban": "plugins/kanban/dashboard/plugin_api.py (bundled dashboard tab preferences)",
 }
 
+# Provider-selection config keys whose plugin is activated by the selection rather than by
+# ``plugins.enabled``. The gate deliberately parks every ``kind: exclusive`` manifest, so the
+# selected provider must be joined back here for its ``config_keys`` to stay live.
+_SELECTED_PROVIDER_KEYS: tuple[tuple[str, str], ...] = (
+    ("computer_use", "backend"),
+    ("terminal", "backend"),
+    ("browser", "cloud_provider"),
+    ("delegation", "backend"),
+    ("web", "backend"),
+    ("image_gen", "provider"),
+    ("video_gen", "provider"),
+    ("tts", "provider"),
+    ("stt", "provider"),
+)
+
 
 def _covered(key: str, paths: Iterable[str]) -> bool:
     return any(key == path or key.startswith(path + ".") for path in paths)
@@ -68,6 +83,36 @@ def _selected_memory_provider_manifest():
     return parse_manifest_file(manifest_file, provider_dir, "memory", "memory") if manifest_file else None
 
 
+def _selected_provider_manifests(manifests: Iterable, disabled: set[str]) -> Iterator:
+    """Manifests for provider-selected plugins the general gate parked.
+
+    A ``kind: exclusive`` or user-installed backend is activated by its category's selection key,
+    not by ``plugins.enabled``; the gate therefore returns ``placeholder`` forever. Matching the
+    selected value against the path-derived key (``computer_use/vnc``) also keeps same-named
+    plugins in other categories from silencing a key they do not own.
+    """
+    from hermes_cli.config import cfg_get, load_config
+    from hermes_cli.plugins_manifest import manifest_key, requires_hermes_error
+
+    config = load_config()
+    for section, name_key in _SELECTED_PROVIDER_KEYS:
+        selected = cfg_get(config, section, name_key)
+        if not isinstance(selected, str) or not selected.strip():
+            continue
+        selected = selected.strip()
+        for manifest in manifests:
+            category, _, dir_name = (manifest.key or "").partition("/")
+            if category and category != section:
+                continue
+            if selected not in {manifest.name, dir_name}:
+                continue
+            if {manifest_key(manifest), manifest.name, manifest.key} & disabled:
+                continue
+            if requires_hermes_error(manifest) is not None:
+                continue
+            yield manifest
+
+
 def _active_manifests() -> Iterator:
     """Manifests of the plugins the loader would activate, by its own discovery, precedence and gate."""
     from hermes_cli.plugins_discovery import (
@@ -81,10 +126,12 @@ def _active_manifests() -> Iterator:
     directory_keys = {manifest_key(m) for m in manifests}
     manifests += [m for m in discover_entrypoint_manifests() if manifest_key(m) not in directory_keys]
     disabled, enabled = _get_disabled_plugins(), _get_enabled_plugins()
-    for manifest in resolve_manifest_winners(manifests).values():
+    winners = resolve_manifest_winners(manifests).values()
+    for manifest in winners:
         verdict = gate_manifest(manifest, disabled, enabled)
         if (verdict.action != "placeholder" or verdict.enabled) and requires_hermes_error(manifest) is None:
             yield manifest
+    yield from _selected_provider_manifests(winners, disabled)
     memory = _selected_memory_provider_manifest()
     if memory is not None:
         yield memory

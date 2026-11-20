@@ -180,6 +180,29 @@ def test_plugin_cannot_silence_typos_in_a_whole_core_section(hermes_home, capsys
         assert suggestion in out
 
 
+@pytest.mark.parametrize("section,selection_key", [
+    ("computer_use", "backend"),
+    ("terminal", "backend"),
+    ("browser", "cloud_provider"),
+    ("delegation", "backend"),
+])
+def test_selected_exclusive_provider_declares_its_config_keys(section, selection_key, hermes_home, capsys):
+    plugin = hermes_home / "plugins" / section / "widget"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.yaml").write_text(json.dumps({
+        "name": "widget", "kind": "exclusive", "config_keys": [f"{section}.widget"],
+    }))
+
+    assert _set_notice(f"{section}.widget.endpoint", "https://example.test", capsys)  # installed, not selected
+    _write_config(hermes_home, {section: {selection_key: "widget"}})
+    assert not _set_notice(f"{section}.widget.endpoint", "https://example.test", capsys)
+
+    _write_config(hermes_home, {
+        section: {selection_key: "widget"}, "plugins": {"disabled": [f"{section}/widget"]},
+    })
+    assert _set_notice(f"{section}.widget.endpoint", "https://example.test", capsys)  # selected but disabled
+
+
 def test_selected_memory_provider_declares_its_config_keys(hermes_home, capsys):
     _plugin(hermes_home / "plugins", "widgetmem", ["memory.widgetmem"],
             init_source="from agent.memory_provider import MemoryProvider\n\nclass WidgetMem(MemoryProvider):\n    pass\n")
